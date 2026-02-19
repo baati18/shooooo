@@ -9,22 +9,45 @@ dotenv.config();
 
 const app = express();
 
-// Middleware - Allow frontend connection
+// ==================== CORS CONFIGURATION - UPDATED ====================
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+  'https://shooooo.vercel.app', // Vercel frontend
+  process.env.FRONTEND_URL || 'https://shooooo.vercel.app'
+].filter(Boolean);
+
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-  credentials: true
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      console.log('CORS blocked origin:', origin);
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
+
 app.use(express.json());
 
-// MongoDB Connection
+// ==================== MONGODB CONNECTION ====================
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/sales_db';
 
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
 .then(() => console.log('✅ MongoDB connected successfully'))
 .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // ==================== ADMIN SCHEMA ====================
-
 const adminSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -91,8 +114,7 @@ adminSchema.methods.comparePassword = async function(candidatePassword) {
 const Admin = mongoose.model('Admin', adminSchema);
 
 // ==================== EXISTING SCHEMAS with CREATED/UPDATED BY ====================
-
-// 1. General Sales Schema - WITH CREATED/UPDATED BY
+// 1. General Sales Schema
 const generalSalesSchema = new mongoose.Schema({
   magaca: {
     type: String,
@@ -134,7 +156,7 @@ const generalSalesSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// 2. Daily Breakdown Schema - WITH CREATED/UPDATED BY
+// 2. Daily Breakdown Schema
 const dailyBreakdownSchema = new mongoose.Schema({
   magaca: {
     type: String,
@@ -176,7 +198,7 @@ const dailyBreakdownSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// 3. Customer Credit Schema - WITH CREATED/UPDATED BY
+// 3. Customer Credit Schema
 const customerCreditSchema = new mongoose.Schema({
   magaca: {
     type: String,
@@ -218,7 +240,7 @@ const customerCreditSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// 4. Out of Stock Schema - WITH CREATED/UPDATED BY
+// 4. Out of Stock Schema
 const outOfStockSchema = new mongoose.Schema({
   magaca: {
     type: String,
@@ -269,14 +291,12 @@ const outOfStockSchema = new mongoose.Schema({
 });
 
 // ==================== MODELS ====================
-
 const GeneralSales = mongoose.model('GeneralSales', generalSalesSchema);
 const DailyBreakdown = mongoose.model('DailyBreakdown', dailyBreakdownSchema);
 const CustomerCredit = mongoose.model('CustomerCredit', customerCreditSchema);
 const OutOfStock = mongoose.model('OutOfStock', outOfStockSchema);
 
 // ==================== AUTHENTICATION MIDDLEWARE ====================
-
 const authenticateAdmin = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -302,6 +322,55 @@ const authenticateAdmin = async (req, res, next) => {
     });
   }
 };
+
+// ==================== PUBLIC ROUTES ====================
+
+// Root endpoint - UPDATED with more info
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Sales Management API',
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    endpoints: {
+      health: '/health',
+      auth: {
+        register: '/api/admin/register',
+        login: '/api/admin/login',
+        profile: '/api/admin/profile',
+        changePassword: '/api/admin/change-password',
+        logout: '/api/admin/logout'
+      },
+      data: {
+        stats: '/api/stats',
+        generalSales: '/api/general-sales',
+        dailyBreakdown: '/api/daily-breakdown',
+        customerCredit: '/api/customer-credit',
+        outOfStock: '/api/out-of-stock'
+      }
+    },
+    documentation: 'https://github.com/yourusername/sales-management'
+  });
+});
+
+// Health check endpoint - UPDATED with more details
+app.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: {
+      status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      state: mongoose.STATES[mongoose.connection.readyState]
+    },
+    memory: process.memoryUsage(),
+    message: 'Server is running properly'
+  });
+});
 
 // ==================== ADMIN ROUTES ====================
 
@@ -507,7 +576,7 @@ app.put('/api/admin/change-password', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Logout (optional - client side should remove token)
+// Logout
 app.post('/api/admin/logout', authenticateAdmin, async (req, res) => {
   res.json({
     success: true,
@@ -516,7 +585,6 @@ app.post('/api/admin/logout', authenticateAdmin, async (req, res) => {
 });
 
 // ==================== HELPER FUNCTIONS ====================
-
 const createSearchQuery = (model, searchTerm) => {
   if (!searchTerm) return {};
   
@@ -557,11 +625,10 @@ const createSearchQuery = (model, searchTerm) => {
 };
 
 // ==================== CRUD ROUTES FACTORY ====================
-
 const createCrudRoutes = (Model, modelName) => {
   const router = express.Router();
 
-  // GET all with search (protected) - POPULATE createdBy and updatedBy
+  // GET all with search (protected)
   router.get('/', authenticateAdmin, async (req, res) => {
     try {
       const { search } = req.query;
@@ -586,7 +653,7 @@ const createCrudRoutes = (Model, modelName) => {
     }
   });
 
-  // GET single item by ID (protected) - POPULATE createdBy and updatedBy
+  // GET single item by ID (protected)
   router.get('/:id', authenticateAdmin, async (req, res) => {
     try {
       const item = await Model.findById(req.params.id)
@@ -612,7 +679,7 @@ const createCrudRoutes = (Model, modelName) => {
     }
   });
 
-  // POST create new item (protected) - SET createdBy and updatedBy
+  // POST create new item (protected)
   router.post('/', authenticateAdmin, async (req, res) => {
     try {
       // Validate only required fields
@@ -670,7 +737,7 @@ const createCrudRoutes = (Model, modelName) => {
     }
   });
 
-  // PUT update item (protected) - UPDATE updatedBy
+  // PUT update item (protected)
   router.put('/:id', authenticateAdmin, async (req, res) => {
     try {
       // If time is provided as empty string, set to null
@@ -747,7 +814,6 @@ const createCrudRoutes = (Model, modelName) => {
 };
 
 // ==================== ROUTES ====================
-
 app.use('/api/general-sales', createCrudRoutes(GeneralSales, 'generalSales'));
 app.use('/api/daily-breakdown', createCrudRoutes(DailyBreakdown, 'dailyBreakdown'));
 app.use('/api/customer-credit', createCrudRoutes(CustomerCredit, 'customerCredit'));
@@ -808,27 +874,21 @@ app.get('/api/stats', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Public health check endpoint (no auth required)
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    message: 'Server is running properly'
-  });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Sales Management API',
-    version: '1.0.0',
-    endpoints: [
+// ==================== 404 HANDLER ====================
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.originalUrl,
+    method: req.method,
+    availableEndpoints: [
+      '/',
       '/health',
       '/api/admin/register',
       '/api/admin/login',
       '/api/admin/profile',
       '/api/admin/change-password',
+      '/api/admin/logout',
       '/api/stats',
       '/api/general-sales',
       '/api/daily-breakdown',
@@ -838,62 +898,38 @@ app.get('/', (req, res) => {
   });
 });
 
-// ==================== ERROR HANDLING ====================
-
-// 404 handler for undefined routes
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
-});
-
-// Global error handler
+// ==================== GLOBAL ERROR HANDLER ====================
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({
     success: false,
     message: 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    timestamp: new Date().toISOString()
   });
 });
 
 // ==================== START SERVER ====================
-
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║     🚀 Server is running!                    ║
 ╠══════════════════════════════════════════════╣
 ║  Port: ${PORT}                                      ║
-║  MongoDB: ${MONGODB_URI}        ║
+║  Environment: ${process.env.NODE_ENV || 'development'}                  ║
+║  MongoDB: ${MONGODB_URI.replace(/:[^:]*@/, ':****@')}  ║
 ║  Status: ✅ Connected                         ║
 ║                                              ║
-║  Admin Routes:                                ║
-║  • POST   /api/admin/register                 ║
-║  • POST   /api/admin/login                    ║
-║  • GET    /api/admin/profile                  ║
-║  • PUT    /api/admin/change-password          ║
-║  • POST   /api/admin/logout                    ║
-║                                              ║
-║  New Features:                                ║
-║  • Created By  👤 (Who created)                ║
-║  • Updated By  ✏️ (Who last updated)           ║
-║  • Time Field: ⏱️  OPTIONAL                    ║
-║  • Description Field: 📝 OPTIONAL              ║
-║                                              ║
-║  Collections:                                 ║
-║  • General Sales     (➕ createdBy/updatedBy)  ║
-║  • Daily Breakdown   (➕ createdBy/updatedBy)  ║
-║  • Customer Credit   (➕ createdBy/updatedBy)  ║
-║  • Out of Stock      (➕ createdBy/updatedBy)  ║
+║  Frontend URLs:                              ║
+║  • http://localhost:5173                     ║
+║  • https://shooooo.vercel.app                 ║
 ║                                              ║
 ║  Test URLs:                                  ║
-║  • http://localhost:${PORT}/                    ║
-║  • http://localhost:${PORT}/health              ║
-║  • http://localhost:${PORT}/api/stats           ║
+║  • https://shooooo.onrender.com/              ║
+║  • https://shooooo.onrender.com/health        ║
+║  • https://shooooo.onrender.com/api/stats     ║
 ╚══════════════════════════════════════════════╝
   `);
 });
